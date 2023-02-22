@@ -1,7 +1,9 @@
 package org.jordynsblog.naviplayer
 
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
@@ -11,15 +13,14 @@ import android.widget.TextView
 import android.widget.Toast
 import com.google.android.material.snackbar.Snackbar
 import androidx.appcompat.app.AppCompatActivity
+import androidx.fragment.app.commit
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.preference.PreferenceManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 import org.jordynsblog.naviplayer.databinding.ActivityHomeBinding
 
 class HomeActivity : AppCompatActivity() {
@@ -48,15 +49,46 @@ class HomeActivity : AppCompatActivity() {
 
         // Init server
         server = Server(serverUrl, username, password, authMethod,this)
-        server.login()
-        rememberCoroutineScope
+        lifecycleScope.launch(Dispatchers.IO) {
+            var loginsuccessful: Boolean
+
+            try {
+                loginsuccessful = server.login()
+            } catch (e: java.net.ConnectException) {
+                Log.d("HomeActivity", "java.net.ConnectException thrown with message ${e.message} when trying to login")
+                loginsuccessful = false
+            }
+
+            if ( ! loginsuccessful) {
+                Log.d("HomeActivity.onLoginFailure", "login failure, starting login activity")
+                startActivity(Intent(applicationContext, LoginActivity::class.java))
+                finish()
+            }
+        }
+
+        lifecycleScope.launch {
+            val albumlist: JSON.response? = server.getAlbumList("alphabeticalByName", 5, 0, null, null, null)
+            if (albumlist != null) {
+                Toast.makeText(applicationContext, "Album listing successful!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(applicationContext, "Album listing failed!", Toast.LENGTH_SHORT).show()
+            }
+
+            for (album in albumlist?.subsonic_response?.albumList?.album!!) {
+                Toast.makeText(applicationContext, "Album: ${album.name}", Toast.LENGTH_SHORT).show()
+
+                val albumart: ByteArray = server.getCoverArt(album.id, null)
+                val bitmap = BitmapFactory.decodeByteArray(albumart, 0, albumart.size)
+
+                supportFragmentManager.commit {
+                    setReorderingAllowed(true)
+                    val fragment = albumfragment.newInstance(album.name, album.id, bitmap)
+                    add(R.id.album_grid_view, fragment)
+                }
+            }
+        }
     }
 
-    fun onLoginFailure(exc: Throwable) {
-        Log.d("HomeActivity.onLoginFailure", "login failure with message = ${exc.message}, starting login activity")
-        startActivity(Intent(this, LoginActivity::class.java))
-        finish()
-    }
 
     /*                    Log.d("HomeActivity.populateAlbums", "First Album: ${response.subsonic_response.albumList!!.album[0].name}")
                     server.getCoverArt(response.subsonic_response.albumList!!.album[0].id, null)*/

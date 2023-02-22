@@ -1,32 +1,40 @@
 package org.jordynsblog.naviplayer
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Bundle
-import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
+import androidx.fragment.app.Fragment
 
-// TODO: Rename parameter arguments, choose names that match
-// the fragment initialization parameters, e.g. ARG_ITEM_NUMBER
-private const val ARG_PARAM1 = "param1"
-private const val ARG_PARAM2 = "param2"
+
+// Parameter arguments
+private const val ARG_ALBUMNAME = "albumname";
+private const val ARG_ALBUMID = "albumid";
+private const val ARG_ALBUMART = "albumart";
 
 /**
  * A simple [Fragment] subclass.
  * Use the [album.newInstance] factory method to
  * create an instance of this fragment.
  */
-class album : Fragment() {
+class albumfragment : Fragment(R.layout.fragment_album) {
     // TODO: Rename and change types of parameters
-    private var param1: String? = null
-    private var param2: String? = null
+    private var albumname: String? = null
+    private var albumid: String? = null
+    private var albumart: Bitmap? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         arguments?.let {
-            param1 = it.getString(ARG_PARAM1)
-            param2 = it.getString(ARG_PARAM2)
+            albumname = it.getString(ARG_ALBUMNAME)
+            albumid = it.getString(ARG_ALBUMID)
+            albumart = it.getSerializable(ARG_ALBUMART, Bitmap) as Bitmap
         }
+        val albumartimageview = view?.findViewById<ImageView>(R.id.albumArtImageView)
+        albumartimageview?.setImageBitmap(albumart)
     }
 
     override fun onCreateView(
@@ -46,13 +54,13 @@ class album : Fragment() {
          * @param param2 Parameter 2.
          * @return A new instance of fragment album.
          */
-        // TODO: Rename and change types and number of parameters
         @JvmStatic
-        fun newInstance(param1: String, param2: String) =
-            album().apply {
+        fun newInstance(albumname: String, albumid: String, albumart: ByteArray) =
+            albumfragment().apply {
                 arguments = Bundle().apply {
-                    putString(ARG_PARAM1, param1)
-                    putString(ARG_PARAM2, param2)
+                    putString(ARG_ALBUMNAME, albumname)
+                    putString(ARG_ALBUMID, albumid)
+                    putByteArray(ARG_ALBUMART, albumart)
                 }
             }
     }

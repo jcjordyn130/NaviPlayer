@@ -14,8 +14,11 @@ import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
 import com.beust.klaxon.Klaxon
 import io.ktor.client.*
+import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 import java.util.*
 import kotlin.coroutines.resume
@@ -59,6 +62,12 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
         this.authMethod = authMethod
     }
 
+    /* MD5HashString is self-explanatory, it encodes a string to uppercase hexadeicmal formatted
+     * MD5.
+     *
+     * This function is used purely for token authentication as a rudimentary form of encryption,
+     * in addition to a salt to avoid MD5 collision exploits.
+     */
     fun MD5HashString(input: String): String {
         val bytes = MessageDigest.getInstance("MD5").digest(input.toByteArray())
         val hex: StringBuilder = StringBuilder()
@@ -73,6 +82,11 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
         return hex.toString()
     }
 
+    /* HexEncodeString is self-explanatory, it encodes a string to uppercase hexadecimal
+     * and returns it.
+     *
+     * This is used for token authentiation and obfuscated authentication.
+     */
     fun HexEncodeString(input: String): String {
         val bytes = input.toByteArray()
         val hex: StringBuilder = StringBuilder()
@@ -86,32 +100,45 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
         return hex.toString()
     }
 
-    suspend fun getCoverArt(id: String, size: Int?): Bitmap? =
-        suspendCoroutine { cont ->
-            val builder = getBuilder()
-            builder.appendPath("rest")
-            builder.appendPath("getCoverArt")
+    suspend fun login(): Boolean = withContext(Dispatchers.IO) {
+        val builder = getBuilder()
+        builder.appendPath("rest")
+        builder.appendPath("ping.view")
+        val url = builder.build().toString()
+        Log.d("Server.login", "Using login URL: $url")
 
-            builder.appendQueryParameter("id", id)
-            if (size != null) {
-                builder.appendQueryParameter("size", size.toString())
-            }
+        val response = KTorClient.get(url).bodyAsText()
+        val result = Klaxon().parse<JSON.response>(response) as JSON.response
 
-            val url = builder.build().toString()
-
-            val successHandler = Response.Listener<Bitmap> { bitmap ->
-                    Log.d("server.getCoverArt", "Successfully retrieved cover art for ID $id")
-                    cont.resume(bitmap)
-            }
-
-            val errorHandler = Response.ErrorListener { error ->
-                Log.d("server.getCoverArt", "Error occurred while retrieving cover art for ID $id")
-                cont.resume(null)
-            }
-
-            val request = ImageRequest(url, {}, 0, 0, ImageView.ScaleType.CENTER, null, {})
-            vollyQueue.add(request)
+        if (result.subsonic_response.status == "ok") {
+            Log.d("Server.login", "Login successful")
+            return@withContext true
+        } else if (result.subsonic_response.status == "failed") {
+            return@withContext false
+        } else {
+            // what?
+            throw Exception("Unknown status: ${result.subsonic_response.status}")
         }
+    }
+
+    suspend fun getCoverArt(id: String, size: Int?): ByteArray = withContext(Dispatchers.IO) {
+        val builder = getBuilder()
+        builder.appendPath("rest")
+        builder.appendPath("getCoverArt")
+
+        builder.appendQueryParameter("id", id)
+        if (size != null) {
+            builder.appendQueryParameter("size", size.toString())
+        }
+
+        val url = builder.build().toString()
+
+        Log.d("Server.getCoverArt", "Fetching cover art for ID $id using size $size and URL $url")
+
+        val result: HttpResponse = KTorClient.get(url)
+
+        return@withContext result.body()
+    }
 
     suspend fun getAlbumList(
         type: String,
@@ -119,27 +146,42 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
         offset: Int,
         fromYear: Int?,
         toYear: Int?,
-        genre: String?)=
-            suspendCoroutine<JSON.response?> { cout ->
-                val builder = getBuilder()
-                builder.appendPath("rest")
-                builder.appendPath("getAlbumList")
+        genre: String?): JSON.response? = withContext(Dispatchers.IO)
+    {
+            val builder = getBuilder()
+            builder.appendPath("rest")
+            builder.appendPath("getAlbumList")
 
-                builder.appendQueryParameter("type", type)
-                builder.appendQueryParameter("size", size.toString())
-                builder.appendQueryParameter("offset", offset.toString())
-                builder.appendQueryParameter("fromYear", fromYear.toString())
-                builder.appendQueryParameter("toYear", toYear.toString())
-                builder.appendQueryParameter("genre", genre)
+            // convert function parameters to query paramaeters
+            builder.appendQueryParameter("type", type)
+            builder.appendQueryParameter("size", size.toString())
+            builder.appendQueryParameter("offset", offset.toString())
+            builder.appendQueryParameter("fromYear", fromYear.toString())
+            builder.appendQueryParameter("toYear", toYear.toString())
+            builder.appendQueryParameter("genre", genre)
 
-                val url = builder.build().toString()
-                Log.d("Server.getAlbumList", "Using REST URL: $url")
+            val url = builder.build().toString()
+            Log.d("Server.getAlbumList", "Using REST URL: $url")
 
-                val successCallback = Response.Listener<String> { response ->
-                    Log.d("Server.getAlbumList", "REST Response: ${response}")
+            val json = KTorClient.get(url).bodyAsText()
+            val result = Klaxon().parse<JSON.response>(json)
+            when (result?.subsonic_response?.status) {
+                "ok" -> {
+                    return@withContext result
+                }
 
-                    val result = Klaxon().parse<JSON.response>(response) as JSON.response
+                "failed" -> {
+                    return@withContext null
+                }
 
+                else -> {
+                    throw Exception("Unknown status variable ($result.subsonic_response.status) returned from album listing!")
+                }
+            }
+
+    }
+
+    /*
                     if (result.subsonic_response.status == "ok") {
                         Toast.makeText(context, "Artist listing successful", Toast.LENGTH_SHORT)
                             .show()
@@ -161,7 +203,7 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
                 val request = StringRequest(Request.Method.GET, url, successCallback, errorCallback)
 
                 vollyQueue.add(request)
-            }
+            } */
 
     // getBuilder is used in all of the REST methods to avoid having to handle
     // building a URL from scratch and to avoid having to redo the auth token
@@ -198,60 +240,4 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
 
         return builder
     }
-
-    suspend fun login(): Boolean {
-        val builder = getBuilder()
-        builder.appendPath("rest")
-        builder.appendPath("ping.view")
-        val url = builder.build().toString()
-        Log.d("Server.login", "Using login URL: $url")
-
-        val response = KTorClient.get(url).bodyAsText()
-        val result = Klaxon().parse<JSON.response>(response) as JSON.response
-
-        if (result.subsonic_response.status == "ok") {
-            Log.d("Server.login", "Login successful")
-            return true
-        } else if (result.subsonic_response.status == "failed") {
-            return false
-        } else {
-            // what?
-            throw Exception("Unknown status: ${result.subsonic_response.status}")
-        }
-    }
-
-    /*suspend fun login() = suspendCoroutine<Boolean> { cout ->
-        val builder = getBuilder()
-        builder.appendPath("rest")
-        builder.appendPath("ping.view")
-        val url = builder.build().toString()
-        Log.d("Server.login", "Using login URL: $url")
-
-        val successCallback = Response.Listener<String> { response ->
-            Log.d("Server.login", "REST Response: ${response}")
-
-            val result = Klaxon().parse<JSON.response>(response) as JSON.response
-
-            if (result.subsonic_response.status == "ok") {
-                Log.d("Server.login", "Login successful")
-                cout.resume(true)
-            } else if (result.subsonic_response.status == "failed") {
-                cout.resume(false)
-            } else {
-                // what?
-                throw Exception("Unknown status: ${result.subsonic_response.status}")
-            }
-
-        }
-
-        val errorCallback = Response.ErrorListener { error ->
-            Log.d("Server.login", "ErrorHandler called during login GET: $error")
-            cout.resume(false)
-        }
-
-        val request = StringRequest(Request.Method.GET, url, successCallback, errorCallback)
-
-        // Add the request to the RequestQueue.
-        vollyQueue.add(request)
-    }*/
 }

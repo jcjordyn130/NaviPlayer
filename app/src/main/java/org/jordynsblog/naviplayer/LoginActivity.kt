@@ -101,7 +101,7 @@ class LoginActivity: AppCompatActivity() {
         editor.apply()
 
         server = Server(serverUrl, username, password, authMethod,this)
-        this.lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch(Dispatchers.IO) {
             if (server.login()) {
                 Log.d("LoginActivity.login", "Login coroutine returned true, launching home activity.")
                 startActivity(Intent(applicationContext, HomeActivity::class.java))
