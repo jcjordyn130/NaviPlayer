@@ -1,34 +1,22 @@
 package org.jordynsblog.naviplayer
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
-import android.widget.ImageView
-import android.widget.Toast
-import com.android.volley.Request
-import com.android.volley.RequestQueue
-import com.android.volley.Response
-import com.android.volley.toolbox.ImageRequest
-import com.android.volley.toolbox.StringRequest
-import com.android.volley.toolbox.Volley
-import com.beust.klaxon.Klaxon
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.*
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
+import kotlin.io.path.Path
+import kotlin.io.path.exists
 
-/*
-class CustomException(message: String? = null, cause: Throwable? = null) : Exception(message, cause) {
-    constructor(cause: Throwable) : this(null, cause)
-}
- */
 
 class ErrorCodeException(code: Int, message: String): Exception() {
 }
@@ -38,11 +26,10 @@ class ErrorCodeException(code: Int, message: String): Exception() {
 class Server (serverUrl: String, username: String, password: String, authMethod: String, context: Context) {
     // These two variables are the subsonic API version we're compliant with
     // along with our application name... these should not normally be changed.
-    private var apiVersion = "1.16.1"
-    private var apiApplcation = "NaviPlayer-Testing"
+    private val apiVersion = "1.16.1"
+    private val apiApplcation = "NaviPlayer-Testing"
 
-    private var KTorClient = HttpClient()
-    private lateinit var vollyQueue: RequestQueue
+    private val KTorClient = HttpClient()
     private lateinit var serverUrl: String
     private lateinit var context: Context
     private lateinit var salt: String
@@ -53,8 +40,6 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
 
     init {
         Log.d("Server.init","Server class initialized using serverUrl = $serverUrl")
-        //Log.d("Server.init", "Creating Volly Request Queue")
-        this.vollyQueue = Volley.newRequestQueue(context)
         this.serverUrl = serverUrl
         this.context = context
         this.username = username
@@ -108,7 +93,7 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
         Log.d("Server.login", "Using login URL: $url")
 
         val response = KTorClient.get(url).bodyAsText()
-        val result = Klaxon().parse<JSON.response>(response) as JSON.response
+        val result = Json.decodeFromString<JSON.response>(response)
 
         if (result.subsonic_response.status == "ok") {
             Log.d("Server.login", "Login successful")
@@ -121,7 +106,24 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
         }
     }
 
-    suspend fun getCoverArt(id: String, size: Int?): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun getCoverArt(id: String, size: Int?): Path = withContext(Dispatchers.IO) {
+        // Verify that the album art directory exists and is readable
+        val coverartdir = Path(context.cacheDir.toString(), "albumart")
+        if (! coverartdir.exists() ) {
+            Log.d("Server.getCoverArt", "Album art cache directory $coverartdir does NOT exist! Creating...")
+            if ( ! coverartdir.toFile().mkdirs() ) {
+                Log.e("Server.getCoverArt", "Album art cache directory creation failed... crashing!")
+                throw Exception("Unable to create directory $coverartdir")
+            }
+        }
+
+        val coverartfile = Path(context.cacheDir.toString(), "albumart", MD5HashString("$id$size"))
+
+        Log.d("Server.getCoverArt", "Using ${coverartfile.toString()} as file for cover art...")
+        if (coverartfile.exists()) {
+            return@withContext coverartfile
+        }
+
         val builder = getBuilder()
         builder.appendPath("rest")
         builder.appendPath("getCoverArt")
@@ -136,8 +138,12 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
         Log.d("Server.getCoverArt", "Fetching cover art for ID $id using size $size and URL $url")
 
         val result: HttpResponse = KTorClient.get(url)
+        coverartfile.toFile().writeBytes(result.body())
 
-        return@withContext result.body()
+        // TODO: handle errors from getCoverArt
+        // Navidrome returns default cover art if the ID does not exist but will error out
+        // if the authentication is invalid or something.
+        return@withContext coverartfile
     }
 
     suspend fun getAlbumList(
@@ -164,8 +170,8 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
             Log.d("Server.getAlbumList", "Using REST URL: $url")
 
             val json = KTorClient.get(url).bodyAsText()
-            val result = Klaxon().parse<JSON.response>(json)
-            when (result?.subsonic_response?.status) {
+            val result = Json.decodeFromString<JSON.response>(json)
+            when (result.subsonic_response.status) {
                 "ok" -> {
                     return@withContext result
                 }
@@ -180,30 +186,6 @@ class Server (serverUrl: String, username: String, password: String, authMethod:
             }
 
     }
-
-    /*
-                    if (result.subsonic_response.status == "ok") {
-                        Toast.makeText(context, "Artist listing successful", Toast.LENGTH_SHORT)
-                            .show()
-                        cout.resume(result)
-                    } else if (result.subsonic_response.status == "failed") {
-                        cout.resume(null)
-                    } else {
-                        // what?
-                        throw Exception("Unknown status: ${result.subsonic_response.status}")
-                    }
-
-                }
-
-                val errorCallback = Response.ErrorListener { error ->
-                    Log.d("Server.login", "ErrorHandler called during login GET: $error")
-                    cout.resume(null)
-                }
-
-                val request = StringRequest(Request.Method.GET, url, successCallback, errorCallback)
-
-                vollyQueue.add(request)
-            } */
 
     // getBuilder is used in all of the REST methods to avoid having to handle
     // building a URL from scratch and to avoid having to redo the auth token

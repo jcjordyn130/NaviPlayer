@@ -1,30 +1,24 @@
 package org.jordynsblog.naviplayer
 
-import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
-import android.widget.RadioGroup
-import android.widget.TextView
-import android.widget.Toast
-import com.google.android.material.snackbar.Snackbar
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
-import androidx.fragment.app.commit
 import androidx.lifecycle.lifecycleScope
-import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
-import androidx.navigation.ui.navigateUp
-import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.preference.PreferenceManager
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.*
 import org.jordynsblog.naviplayer.databinding.ActivityHomeBinding
+import java.nio.file.Path
+
 
 class HomeActivity : AppCompatActivity() {
-
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityHomeBinding
     private lateinit var sharedPreferences: SharedPreferences
@@ -36,9 +30,13 @@ class HomeActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
 
-        //Config(applicationContext)
-        //sharedPreferences = Config.instance.sharedPreferences
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+
+        // Debug logging
+        Log.d("HomeActivity.onCreate", "Cache Directory Listing: ")
+        applicationContext.cacheDir.walk().forEach {
+            Log.d("HomeActivity.onCreate", "${it.name} ${it.length()}")
+        }
 
         // Load saved values
         Log.d("HomeActivity.onCreate", "Loading saved values from SharedPrefs")
@@ -48,7 +46,7 @@ class HomeActivity : AppCompatActivity() {
         val authMethod = sharedPreferences.getString("authMethod", "token") as String
 
         // Init server
-        server = Server(serverUrl, username, password, authMethod,this)
+        server = Server(serverUrl, username, password, authMethod,applicationContext)
         lifecycleScope.launch(Dispatchers.IO) {
             var loginsuccessful: Boolean
 
@@ -64,36 +62,56 @@ class HomeActivity : AppCompatActivity() {
                 startActivity(Intent(applicationContext, LoginActivity::class.java))
                 finish()
             }
-        }
 
-        lifecycleScope.launch {
-            val albumlist: JSON.response? = server.getAlbumList("alphabeticalByName", 5, 0, null, null, null)
-            if (albumlist != null) {
-                Toast.makeText(applicationContext, "Album listing successful!", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(applicationContext, "Album listing failed!", Toast.LENGTH_SHORT).show()
-            }
-
-            for (album in albumlist?.subsonic_response?.albumList?.album!!) {
-                Toast.makeText(applicationContext, "Album: ${album.name}", Toast.LENGTH_SHORT).show()
-
-                val albumart: ByteArray = server.getCoverArt(album.id, null)
-                val bitmap = BitmapFactory.decodeByteArray(albumart, 0, albumart.size)
-
-                supportFragmentManager.commit {
-                    setReorderingAllowed(true)
-                    val fragment = albumfragment.newInstance(album.name, album.id, bitmap)
-                    add(R.id.album_grid_view, fragment)
-                }
-            }
+            //withContext(Dispatchers.Main) {
+             //   populateAlbums()
+            //}
         }
     }
 
+    fun populateAlbums() {
+        val gridview = findViewById<RecyclerView>(R.id.albumgrid)
+        val adapter = CustomAdapter()
+        gridview.adapter = adapter
+        gridview.layoutManager = GridLayoutManager(this, 3)
 
-    /*                    Log.d("HomeActivity.populateAlbums", "First Album: ${response.subsonic_response.albumList!!.album[0].name}")
-                    server.getCoverArt(response.subsonic_response.albumList!!.album[0].id, null)*/
-    suspend fun populateAlbums() {
-        server.getAlbumList("alphabeticalByName", 10, 0, null, null, null)
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                val albumlist = server.getAlbumList("alphabeticalByName", 9999, 0, null, null, null)
+
+                if (albumlist != null) {
+                    for (album in albumlist.subsonic_response.albumList.album) {
+                        Log.d("HomeActivity.onCreate", "Using album ${album.name}")
+
+                        val albumart: Path? = album.coverArt?.let { server.getCoverArt(it, null) }
+
+                        withContext(Dispatchers.Main) {
+                            adapter.addAlbum(album.name, albumart.toString())
+                        }
+                        /*val fragment =
+                            albumfragment.newInstance(album.name, album.id, albumart.toString())
+
+                        withContext(Dispatchers.Main) {
+                            val fragmentview = FragmentContainerView(applicationContext)
+                            fragmentview.id = View.generateViewId()
+
+                            val albumgrid = findViewById<GridView>(R.id.albumgrid)
+                            //albumgrid.columnCount = 2
+                            //albumgrid.
+
+                            supportFragmentManager.commit {
+                                setReorderingAllowed(true)
+                                add(fragmentview.id, fragment)
+                            }
+                        }*/
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(applicationContext, "Album listing failed!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
